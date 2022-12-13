@@ -7,6 +7,7 @@ import * as O from "fp-ts/Option";
 import { pipe } from "fp-ts/function";
 import { exec } from "child_process";
 import * as path from "path";
+import { parseRemoteUrl } from "./parseRemote";
 
 const execTE = TE.taskify<string, { cwd: string }, string, string>(exec as any);
 
@@ -35,12 +36,11 @@ const isUri = (u: unknown): u is vscode.Uri => {
   return u instanceof vscode.Uri;
 };
 
-const parseURL = TE.fromEitherK(
-  E.tryCatchK(
-    (url: string) => new URL(url),
-    () => ({ message: "Error parsing scm url" })
-  )
-);
+const parseURL = (url: string) =>
+  pipe(
+    parseRemoteUrl(url),
+    TE.fromOption(() => ({ message: `Error parsing scm url: ${url}` }))
+  );
 
 const getHeadCommit = (cwd: string) =>
   pipe(
@@ -52,17 +52,17 @@ const getHeadCommit = (cwd: string) =>
 const getBranch = (cwd: string) =>
   pipe(
     execTE("git rev-parse --abbrev-ref HEAD", { cwd }),
-    TE.mapLeft((cause) => ({ message: "Error getting current branch", cause })),
-    TE.map((branch) => (branch === "HEAD" ? O.none : O.some(branch))),
-    TE.map(O.map((b) => `refs/heads/${b}`.trim()))
+    TE.map((b) => b.trim()),
+    TE.mapLeft((cause) => ({ message: "Error getting current branch", cause }))
   );
 
-const parseUri = TE.fromEitherK(
-  E.tryCatchK(
-    (url: string) => vscode.Uri.parse(url),
-    () => ({ message: "Error parsing url" })
-  )
-);
+const parseUri = (url: string) =>
+  TE.fromEither(
+    E.tryCatch(
+      () => vscode.Uri.parse(url, true),
+      () => ({ message: `Error formatting url: ${url}` })
+    )
+  );
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -82,35 +82,32 @@ export function activate(context: vscode.ExtensionContext) {
         ),
         TE.bindW("scmUrl", ({ folder }) =>
           pipe(
-            execTE("git remote get-url origin", { cwd: folder.fsPath }),
-            TE.mapLeft((cause) => ({
-              message: `Error executing git remote get-url origin`,
-              cause,
-            })),
+            vscode.workspace.getConfiguration("gitiles").get("remote") ||
+              "origin",
+            (remote) =>
+              pipe(
+                execTE(`git remote get-url ${remote}`, { cwd: folder.fsPath }),
+                TE.mapLeft((cause) => ({
+                  message: `Error executing git remote get-url ${remote}`,
+                  cause,
+                }))
+              ),
             TE.chainW(parseURL)
           )
         ),
         TE.bindW("line", () => getActiveLineNumber),
-        TE.bindW("ref", ({ folder }) =>
-          pipe(
-            getBranch(folder.fsPath),
-            TE.chainW(
-              O.foldW(
-                () => getHeadCommit(folder.fsPath),
-                (branch) => TE.of(branch)
-              )
-            )
-          )
-        ),
-        TE.bindW("uri", ({ scmUrl, line, fileUri, ref, folder }) => {
+        TE.bindW("branch", ({ folder }) => getBranch(folder.fsPath)),
+        TE.bindW("commit", ({ folder }) => getHeadCommit(folder.fsPath)),
+        TE.bindW("uri", ({ scmUrl, line, fileUri, branch, commit, folder }) => {
           const urlTemplate: string =
             vscode.workspace.getConfiguration("gitiles").get("urlTemplate") ||
             "";
           const url = urlTemplate
-            .replace("${hostname}", scmUrl.hostname)
+            .replace("${domain}", scmUrl.domain)
             .replace("${projectName}", vscode.workspace.name || "")
             .replace("${file}", path.relative(folder.fsPath, fileUri.fsPath))
-            .replace("${ref}", ref)
+            .replace("${branch}", branch)
+            .replace("${commit}", commit)
             .replace(
               "${line}",
               pipe(
