@@ -6,6 +6,10 @@ This extension adds a "Gitiles: View file" which opens a gitiles url for the fil
 
 <img src="https://raw.githubusercontent.com/pfgray/gitiles-vscode-extension/main/gitiles_context_menu.png" width="250px"/>
 
+## Install from the Marketplace
+
+https://marketplace.visualstudio.com/items?itemName=pfgray.gitiles
+
 ## Settings
 
 `gitiles.urlTemplate`: Template url to navigate to, use `${domain}`, `${projectName}`, `${file}`, `${line}`, `${branch}`, `${commit}` as variables.
