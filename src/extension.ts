@@ -112,6 +112,7 @@ export function activate(context: vscode.ExtensionContext) {
               "${line}",
               pipe(
                 line,
+                O.map((n) => n + 1), // line number is zero-based
                 O.map((a) => a.toString()),
                 O.getOrElse(() => "")
               )
